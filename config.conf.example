@@ -1,4 +1,5 @@
 [CONFIG]
+; SMTP_EMAILTO can be a comma separated list
 SMTP_SERVER=
 SMTP_PORT=
 SMTP_USERNAME=

@@ -34,7 +34,7 @@ smtp_port = cp.getint('CONFIG', 'SMTP_PORT')
 smtp_username = cp.get('CONFIG', 'SMTP_USERNAME')
 smtp_password = cp.get('CONFIG', 'SMTP_PASSWORD')
 smtp_emailfrom = cp.get('CONFIG', 'SMTP_EMAILFROM')
-smtp_emailto = cp.get('CONFIG', 'SMTP_EMAILTO')
+smtp_emailto = cp.get('CONFIG', 'SMTP_EMAILTO').split(',')
 
 import re
 from unicodedata import normalize
@@ -70,7 +70,10 @@ def send_mail(send_from, send_to, subject, text, files=[], server="localhost", p
     smtp = smtplib.SMTP(server, port)
     if isTls: smtp.starttls()
     smtp.login(username, password)
-    smtp.sendmail(str(send_from), [str(send_to)], msg.as_string())
+    if isinstance(send_to,list):
+        smtp.sendmail(send_from, send_to, msg.as_string())
+    else:
+        smtp.sendmail(send_from, [send_to], msg.as_string())
     smtp.quit()
 
 
@@ -127,7 +130,7 @@ for id, v in Accounts.items():
         os.remove(name)
 
     with open(id+ '.ofx', 'wb') as out:
-        sys.stdout.write('retrieveing ' + id + '...')
+        sys.stdout.write('retrieving ' + id + '...')
         os.system(' '.join(cmd))
         time.sleep(0.5)
         if os.path.exists(name):
@@ -138,7 +141,7 @@ for id, v in Accounts.items():
         else:
             send_mail(subject="Boobank to OFX Email Problem fetching %s" % datetime.today().strftime('%Y-%m-%d'), text='Error fetching the account %s %s' % (id, v),
                       server=smtp_server, port=smtp_port,
-                      send_from=smtp_emailfrom, send_to=[smtp_emailto],
+                      send_from=smtp_emailfrom, send_to=smtp_emailto,
                       username=smtp_username, password=smtp_password
                       )
             exit(-1)
@@ -149,7 +152,7 @@ if not inputargs.nosend:
     send_mail(subject="Budget OFX %s" % datetime.today().strftime('%Y-%m-%d'), text='Downloaded files',
               files=retrieveds,
               server=smtp_server, port=smtp_port,
-              send_from=smtp_emailfrom, send_to=[smtp_emailto],
+              send_from=smtp_emailfrom, send_to=smtp_emailto,
               username=smtp_username, password=smtp_password
     )
     print("done sending email")
