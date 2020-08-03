@@ -1,5 +1,6 @@
 import smtplib
 import shutil
+import subprocess
 import time
 import sys
 from email.mime.multipart import MIMEMultipart
@@ -11,6 +12,8 @@ import os
 import urllib
 from time import strftime
 
+from contextlib import contextmanager
+from weboob.applications import boobank
 import configparser
 import argparse
 
@@ -19,7 +22,7 @@ parser = argparse.ArgumentParser(description='Automatic Download ofx from winanc
 parser.add_argument('--nosend', dest='nosend', action='store_const',
                     const=True, default=False,
                     help='activate so that email is not sent out')
-parser.add_argument('-numberofdays', metavar='days', type=int, default=14,
+parser.add_argument('-numberofdays', metavar='days', type=int, default=28,
                     help='Number of days to look for data in the past')
 parser.add_argument('--account', metavar='AccountName', type=str, default='',
                     help='Account to treat')
@@ -68,6 +71,7 @@ def send_mail(send_from, send_to, subject, text, files=[], server="localhost", p
         msg.attach(part)
 
     smtp = smtplib.SMTP(server, port)
+    smtp.set_debuglevel(True)
     if isTls: smtp.starttls()
     smtp.login(username, password)
     if isinstance(send_to,list):
@@ -93,29 +97,18 @@ datafile='data.csv'
 if os.path.exists(datafile):
     os.remove(datafile)
 cmd='boobank list -f csv > %s'%datafile
-os.system(cmd)
+BBank=boobank.Boobank()
+args=['','list','-f','csv','outfile','data.csv']
+BBank.parse_args(['','--debug'])
+BBank.load_config()
+BBank.load_backends()
 
 data={}
-if os.path.exists(datafile):
-    print('OK')
-    import csv
-    from collections import namedtuple
+for account in BBank.do('iter_accounts'):
+    data[account.fullid] = account
 
-    with open(datafile, 'rb') as dataf:
-        reader=csv.reader(dataf,delimiter=';',)
-        header=reader.next()
-        tupRow=namedtuple('dataRow',header)
-
-        rows=[tupRow(*row) for row in reader]
-        data={row.id:row for row in rows}
-
-else:
-    send_mail(subject="BooBank to OFX Email Problem fetching data %s" % datetime.today().strftime('%Y-%m-%d'), text='Error fetching the accouts data  (balance etc)',
-      server=smtp_server, port=smtp_port,
-      send_from=smtp_emailfrom, send_to=smtp_emailto,
-      username=smtp_username, password=smtp_password
-    )
-    exit(-1)
+def is_non_zero_file(fpath):
+    return os.path.isfile(fpath) and os.path.getsize(fpath) > 0
 
 for id, v in Accounts.items():
     if (inputargs.account!=''):
@@ -124,27 +117,33 @@ for id, v in Accounts.items():
 
     name= id + '.ofx'
 
-    cmd=['boobank','history',v,startdate.strftime('%Y-%m-%d'),'-f','ofx','>',name]
+    cmd=['boobank','history',v,startdate.strftime('%Y-%m-%d'),'-f','ofx']
 
     if os.path.exists(name):
         os.remove(name)
 
-    with open(id+ '.ofx', 'wb') as out:
-        sys.stdout.write('retrieving ' + id + '...')
-        os.system(' '.join(cmd))
-        time.sleep(0.5)
-        if os.path.exists(name):
-            newname=name+'_'+data[v].balance+'.ofx'
-            shutil.move(name,newname)
-            retrieveds.append(newname)
-            print('OK')
-        else:
-            send_mail(subject="Boobank to OFX Email Problem fetching %s" % datetime.today().strftime('%Y-%m-%d'), text='Error fetching the account %s %s' % (id, v),
-                      server=smtp_server, port=smtp_port,
-                      send_from=smtp_emailfrom, send_to=smtp_emailto,
-                      username=smtp_username, password=smtp_password
-                      )
-            exit(-1)
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+    result = p.stdout.read()
+    err = p.stderr.read()
+    time.sleep(0.5)
+    with open(name,'w') as outputfile:
+        outputfile.write(result)
+    with open('errfile', 'w') as errfile:
+        errfile.write(err)
+    if os.path.exists(name) and is_non_zero_file(name):
+        newname=name+'_'+str(data[v].balance)+'.ofx'
+        shutil.move(name,newname)
+        retrieveds.append(newname)
+        print('OK')
+    else:
+
+        send_mail(subject="Boobank to OFX Email Problem fetching %s" % datetime.today().strftime('%Y-%m-%d'), text='Error fetching the account %s %s' % (id, v),
+                  server=smtp_server, port=smtp_port,
+                  files=[os.path.abspath('resultfile')],
+                  send_from=smtp_emailfrom, send_to=smtp_emailto,
+                  username=smtp_username, password=smtp_password
+                  )
+        exit(-1)
 
 
 if not inputargs.nosend:
